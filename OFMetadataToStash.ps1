@@ -20,7 +20,7 @@ REQUIREMENTS
  #Powershell Dependencies
 #requires -modules PSGraphQL
 #requires -modules PSSQLite
-#requires -Version 7
+
 
 #Import Modules now that we know we have them
 Import-Module PSGraphQL
@@ -214,6 +214,8 @@ function Set-Config{
 
 #DatabaseHasBeenImported does a check to see if a particular metadata database file actually needs to be parsed based on a history file. Returns true if this database needs to be parsed
 function DatabaseHasAlreadyBeenImported{
+    return $false # Temporary force for debugging. This is the same as --IgnoreHistory. Delete this line!
+
     if ($ignorehistory -eq $true){
         return $false
     }
@@ -340,16 +342,16 @@ function Add-MetadataUsingOFDB{
     if ($OFDatabaseFilesCollection.count -eq 1){
 
         #More modern OF DB schemas include the name of the performer in the profile table. If this table does not exist we will have to derive the performer name from the filepath, assuming the db is in a /metadata/ folder.
-        $Query = "PRAGMA table_info(medias)"
-        $OFDBColumnsToCheck = Invoke-SqliteQuery -Query $Query -DataSource $OFDatabaseFilesCollection[0].FullName
+        #$Query = "PRAGMA table_info(medias)"
+        #$OFDBColumnsToCheck = Invoke-SqliteQuery -Query $Query -DataSource $OFDatabaseFilesCollection[0].FullName
         #There's probably a faster way to do this, but I'm throwing the collection into a string, with each column result (aka table name) seperated by a space. 
-        $OFDBColumnsToCheck = [string]::Join(' ',$OFDBColumnsToCheck.name) 
+        #$OFDBColumnsToCheck = [string]::Join(' ',$OFDBColumnsToCheck.name) 
 
         $performername = $null
-        if ($OFDBColumnsToCheck -match "profiles"){
+        #if ($OFDBColumnsToCheck -match "profiles"){
             $Query = "SELECT username FROM profiles LIMIT 1" #I'm throwing that limit on as a precaution-- I'm not sure if multiple usernames will ever be stored in that SQL table
             $performername =  Invoke-SqliteQuery -Query $Query -DataSource $OFDatabaseFilesCollection[0].FullName
-        }
+        #}
 
         #Either the query resulted in null or the profiles table didnt exist, so either way let's use the alternative directory based method.
         if ($null -eq $performername){
@@ -668,13 +670,11 @@ function Add-MetadataUsingOFDB{
             
         }
         else{
-            #More modern OF DB schemas include the name of the performer in the profile table. If this table does not exist we will have to derive the performer name from the filepath, assuming the db is in a /metadata/ folder.
+            #More modern OF DB schemas include the name of the performer in the profiles table. If this table does not exist we will have to derive the performer name from the filepath, assuming the db is in a /metadata/ folder.
             $performername = $null
-            if ($OFDBColumnsToCheck -match "profiles"){
-                $Query = "SELECT username FROM profiles LIMIT 1" #I'm throwing that limit on as a precaution-- I'm not sure if multiple usernames will ever be stored in that SQL table
-                $performername =  Invoke-SqliteQuery -Query $Query -DataSource $currentdatabase.FullName
-                
-            }
+            $Query = "SELECT username FROM profiles LIMIT 1" #I'm throwing that limit on as a precaution-- I'm not sure if multiple usernames will ever be stored in that SQL table
+            $StashGQL_Result =  Invoke-SqliteQuery -Query $Query -DataSource $currentdatabase.FullName
+            $performername = $StashGQL_Result.username
 
             #Either the query resulted in null or the profiles table didnt exist, so either way let's use the alternative directory based method.
             if ($null -eq $performername){
@@ -780,7 +780,7 @@ function Add-MetadataUsingOFDB{
              
             if (!(DatabaseHasAlreadyBeenImported)){
                 #Select all the media (except audio) and the text the performer associated to them, if available from the OFDB
-                $Query = "SELECT messages.text, medias.directory, medias.filename, medias.size, medias.created_at, medias.post_id, medias.media_type FROM medias INNER JOIN messages ON messages.post_id=medias.post_id UNION SELECT posts.text, medias.directory, medias.filename, medias.size, medias.created_at, medias.post_id, medias.media_type FROM medias INNER JOIN posts ON posts.post_id=medias.post_id WHERE medias.media_type <> 'Audios'"
+                $Query = "SELECT messages.text as text, medias.directory AS directory, medias.filename AS filename, medias.size AS size, medias.created_at AS created_at, medias.post_id AS post_id, medias.media_type AS media_type FROM medias INNER JOIN messages ON messages.post_id=medias.post_id UNION SELECT posts.text AS text, medias.directory AS directory, medias.filename AS filename, medias.size AS size, medias.created_at AS created_at, medias.post_id AS post_id, medias.media_type AS media_type FROM medias INNER JOIN posts ON posts.post_id=medias.post_id WHERE medias.media_type <> 'Audios'"
                 $OF_DBpath = $currentdatabase.fullname 
                 $OFDBQueryResult = Invoke-SqliteQuery -Query $Query -DataSource $OF_DBpath
 
@@ -791,9 +791,14 @@ function Add-MetadataUsingOFDB{
                     $currentProgress = [int]$(($progressCounter/$OFDBQueryResult.count)*100)
                     Write-Progress -parentId 1 -Activity "$performername Import Progress" -Status "$currentProgress% Complete" -PercentComplete $currentProgress
                     $progressCounter++
+
+                    # Skip to the next record if there is no size value in the current record
+                    if (!$OFDBMedia.size){
+                      continue
+                    }
     
                     #Generating the URL for this post
-                    $linktoOFpost = "https://www.onlyfans.com/"+$OFDBMedia.post_ID+"/"+$performername
+                    $linktoOFpost = "https://www.onlyfans.com/"+$OFDBMedia.post_id+"/"+$performername
                     
                     #Reformatting the date to something stash appropriate
                     $creationdatefromOF = $OFDBMedia.created_at
@@ -812,11 +817,11 @@ function Add-MetadataUsingOFDB{
     
                     #Note that the OF downloader quantifies gifs as videos for some reason
                     #Since Stash doesn't (and rightfully so), we need to account for this
-                    if(($OFDBMedia.media_type -eq "videos") -and ($OFDBfilename -notlike "*.gif")){
+                    if(($OFDBMedia.media_type -eq "Videos") -and ($OFDBfilename -notlike "*.gif")){
                         $mediatype = "video"
                     }
                     #Condition for images. Again, we have to add an extra condition just in case the image is a gif due to the DG database
-                    elseif(($OFDBMedia.media_type -eq "images") -or ($OFDBfilename -like "*.gif")){
+                    elseif(($OFDBMedia.media_type -eq "Images") -or ($OFDBfilename -like "*.gif")){
                         $mediatype = "image"
                     }
     
@@ -837,7 +842,7 @@ function Add-MetadataUsingOFDB{
                     
                     #Depending on user preference, we want to be more/less specific with our SQL queries to the Stash DB here, as determined by this condition tree (defined in order of percieved popularity)
                     #Normal specificity, search for videos based on having the performer name somewhere in the path and a matching filesize
-                    if ($mediatype -eq "video" -and $searchspecificity -match "normal"){
+                    if ($mediatype -eq "video" -and $searchspecificity -match "Normal"){
                         $StashGQL_Query = 'mutation {
                             querySQL(sql: "SELECT folders.path, files.basename, files.size, files.id AS files_id, folders.id AS folders_id, scenes.id AS scenes_id, scenes.title AS scenes_title, scenes.details AS scenes_details FROM files JOIN folders ON files.parent_folder_id=folders.id JOIN scenes_files ON files.id = scenes_files.file_id JOIN scenes ON scenes.id = scenes_files.scene_id WHERE path LIKE ''%'+$performername+'%'' AND size = '''+$OFDBfilesize+'''") {
                             rows
@@ -845,7 +850,7 @@ function Add-MetadataUsingOFDB{
                         }'             
                     }
                     #Normal specificity, search for images based on having the performer name somewhere in the path and a matching filesize
-                    elseif ($mediatype -eq "image" -and $searchspecificity -match "normal"){
+                    elseif ($mediatype -eq "image" -and $searchspecificity -match "Normal"){
                         $StashGQL_Query = 'mutation {
                             querySQL(sql: "SELECT folders.path, files.basename, files.size, files.id AS files_id, folders.id AS folders_id, images.id AS images_id, images.title AS images_title FROM files JOIN folders ON files.parent_folder_id=folders.id JOIN images_files ON files.id = images_files.file_id JOIN images ON images.id = images_files.image_id WHERE path LIKE ''%'+$performername+'%'' AND size = '''+$OFDBfilesize+'''") {
                             rows
@@ -853,7 +858,7 @@ function Add-MetadataUsingOFDB{
                         }'
                     }
                     #Low specificity, search for videos based on filesize only
-                    elseif ($mediatype -eq "video" -and $searchspecificity -match "low"){
+                    elseif ($mediatype -eq "video" -and $searchspecificity -match "Low"){
                         $StashGQL_Query = 'mutation {
                             querySQL(sql: "SELECT folders.path, files.basename, files.size, files.id AS files_id, folders.id AS folders_id, scenes.id AS scenes_id, scenes.title AS scenes_title, scenes.details AS scenes_details FROM files JOIN folders ON files.parent_folder_id=folders.id JOIN scenes_files ON files.id = scenes_files.file_id JOIN scenes ON scenes.id = scenes_files.scene_id WHERE size = '''+$OFDBfilesize+'''") {
                             rows
@@ -861,7 +866,7 @@ function Add-MetadataUsingOFDB{
                         }'   
                     }
                     #Low specificity, search for images based on filesize only
-                    elseif ($mediatype -eq "image" -and $searchspecificity -match "low"){
+                    elseif ($mediatype -eq "image" -and $searchspecificity -match "Low"){
                         $StashGQL_Query = 'mutation {
                             querySQL(sql: "SELECT folders.path, files.basename, files.size, files.id AS files_id, folders.id AS folders_id, images.id AS images_id, images.title AS images_title FROM files JOIN folders ON files.parent_folder_id=folders.id JOIN images_files ON files.id = images_files.file_id JOIN images ON images.id = images_files.image_id WHERE size = '''+$OFDBfilesize+'''") {
                             rows
@@ -870,7 +875,7 @@ function Add-MetadataUsingOFDB{
                     }
     
                     #High specificity, search for videos based on matching file name between OnlyFans DB and Stash DB as well as matching the filesize. 
-                    elseif ($mediatype -eq "video" -and $searchspecificity -match "high"){
+                    elseif ($mediatype -eq "video" -and $searchspecificity -match "High"){
                         $StashGQL_Query = 'mutation {
                             querySQL(sql: "SELECT folders.path, files.basename, files.size, files.id AS files_id, folders.id AS folders_id, scenes.id AS scenes_id, scenes.title AS scenes_title, scenes.details AS scenes_details FROM files JOIN folders ON files.parent_folder_id=folders.id JOIN scenes_files ON files.id = scenes_files.file_id JOIN scenes ON scenes.id = scenes_files.scene_id WHERE files.basename ='''+$OFDBfilenameForQuery+''' AND size = '''+$OFDBfilesize+'''") {
                             rows
@@ -999,14 +1004,14 @@ function Add-MetadataUsingOFDB{
                         #For some reason the invoke-graphqlquery module doesn't quite escape single/double quotes ' " (or their curly variants) or backslashs \ very well so let's do it manually for the sake of our JSON query
                         $detailsToAddToStash = $detailsToAddToStash.replace("\","\\")
                         $detailsToAddToStash = $detailsToAddToStash.replace('"','\"')
-                        $detailsToAddToStash = $detailsToAddToStash.replace('“','\"') #literally removing the curly quote entirely
-                        $detailsToAddToStash = $detailsToAddToStash.replace('”','\"') #literally removing the curly quote entirely
+                        $detailsToAddToStash = $detailsToAddToStash.replace('â€œ','\"') #literally removing the curly quote entirely
+                        $detailsToAddToStash = $detailsToAddToStash.replace('â€','\"') #literally removing the curly quote entirely
                   
                         $proposedtitle = $proposedtitle.replace("'","''")
                         $proposedtitle = $proposedtitle.replace("\","\\")
                         $proposedtitle = $proposedtitle.replace('"','\"')
-                        $proposedtitle = $proposedtitle.replace('“','\"') #literally removing the curly quote entirely
-                        $proposedtitle = $proposedtitle.replace('”','\"') #literally removing the curly quote entirely
+                        $proposedtitle = $proposedtitle.replace('â€œ','\"') #literally removing the curly quote entirely
+                        $proposedtitle = $proposedtitle.replace('â€','\"') #literally removing the curly quote entirely
     
                         #Let's check to see if this is a file that already has metadata.
                         #If any metadata is missing, we don't bother with updating a specific column, we just update the entire row
