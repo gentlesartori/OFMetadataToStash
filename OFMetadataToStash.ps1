@@ -340,18 +340,9 @@ function Add-MetadataUsingOFDB{
         
     #For the discovery of a single database file
     if ($OFDatabaseFilesCollection.count -eq 1){
-
-        #More modern OF DB schemas include the name of the performer in the profile table. If this table does not exist we will have to derive the performer name from the filepath, assuming the db is in a /metadata/ folder.
-        #$Query = "PRAGMA table_info(medias)"
-        #$OFDBColumnsToCheck = Invoke-SqliteQuery -Query $Query -DataSource $OFDatabaseFilesCollection[0].FullName
-        #There's probably a faster way to do this, but I'm throwing the collection into a string, with each column result (aka table name) seperated by a space. 
-        #$OFDBColumnsToCheck = [string]::Join(' ',$OFDBColumnsToCheck.name) 
-
         $performername = $null
-        #if ($OFDBColumnsToCheck -match "profiles"){
-            $Query = "SELECT username FROM profiles LIMIT 1" #I'm throwing that limit on as a precaution-- I'm not sure if multiple usernames will ever be stored in that SQL table
-            $performername =  Invoke-SqliteQuery -Query $Query -DataSource $OFDatabaseFilesCollection[0].FullName
-        #}
+        $Query = "SELECT username FROM profiles LIMIT 1" #I'm throwing that limit on as a precaution-- I'm not sure if multiple usernames will ever be stored in that SQL table
+        $performername =  Invoke-SqliteQuery -Query $Query -DataSource $OFDatabaseFilesCollection[0].FullName
 
         #Either the query resulted in null or the profiles table didnt exist, so either way let's use the alternative directory based method.
         if ($null -eq $performername){
@@ -1554,3 +1545,4 @@ switch ($userscanselection){
     3 {invoke-expression $pathtosanitizerscript}
     4 {Set-Config}
 }
+
